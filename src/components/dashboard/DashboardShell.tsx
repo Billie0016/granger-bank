@@ -4,15 +4,62 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { Bell, LogOut, Menu, X } from "lucide-react";
+import {
+  Bell,
+  LogOut,
+  Menu,
+  X,
+  LayoutDashboard,
+  Landmark,
+  ArrowLeftRight,
+  Send,
+  CreditCard,
+  Receipt,
+  FileText,
+  Users,
+  User,
+  ShieldCheck,
+  HelpCircle,
+  LifeBuoy,
+  ScrollText,
+  Settings,
+} from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { apiFetch } from "@/lib/apiClient";
 import { cn } from "@/lib/cn";
 
+// Nav items are built in Server Components (dashboard/admin layout.tsx) and
+// passed as a prop into this Client Component. Only plain, serializable
+// data can cross that Server -> Client boundary — a lucide-react icon
+// component reference is a forwardRef object with a `render` method, which
+// React's Flight serializer rejects ("Only plain objects can be passed to
+// Client Components from Server Components"). So NavItem.icon is a
+// serializable string key, resolved to an actual component only here, on
+// the client side of the boundary.
+const NAV_ICONS = {
+  LayoutDashboard,
+  Landmark,
+  ArrowLeftRight,
+  Send,
+  CreditCard,
+  Receipt,
+  FileText,
+  Users,
+  Bell,
+  User,
+  ShieldCheck,
+  HelpCircle,
+  LifeBuoy,
+  ScrollText,
+  Settings,
+} satisfies Record<string, React.ComponentType<{ size?: number; className?: string }>>;
+
+export type NavIconKey = keyof typeof NAV_ICONS;
+
 export type NavItem = {
   href: string;
   label: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
+  icon: NavIconKey;
 };
 
 export function DashboardShell({
@@ -50,6 +97,7 @@ export function DashboardShell({
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
         {navItems.map((item) => {
           const active = pathname === item.href;
+          const Icon = NAV_ICONS[item.icon];
           return (
             <Link
               key={item.href}
@@ -61,7 +109,7 @@ export function DashboardShell({
                   : "text-ivory-dim hover:bg-ivory/[0.05] hover:text-ivory"
               )}
             >
-              <item.icon size={17} className={active ? "text-gold" : "text-mist"} />
+              <Icon size={17} className={active ? "text-gold" : "text-mist"} />
               {item.label}
             </Link>
           );
