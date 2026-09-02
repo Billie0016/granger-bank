@@ -1,0 +1,603 @@
+// Granger Bank — production data model.
+//
+// Money is always an integer count of minor units (cents). Never Float.
+// Balances/transaction settlement state are provider-sourced (see
+// src/server/providers/types.ts) — this schema stores Granger Bank's own
+// record of what was requested/observed, not an independently authoritative
+// balance. See docs/production/02-production-architecture.md §1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// IDENTITY & ACCESS
+// ---------------------------------------------------------------------------
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  emailVerifiedAt   DateTime?
+  phone             String?   @unique
+  phoneVerifiedAt   DateTime?
+
+  // Argon2id hash. Never plaintext, never reversible, never logged.
+  passwordHash      String
+  passwordUpdatedAt DateTime  @default(now())
+
+  role              UserRole  @default(CUSTOMER)
+  adminPermissions  AdminPermission[] @relation("PermissionHolder")
+  grantedPermissions AdminPermission[] @relation("PermissionGrantor")
+
+  status            UserStatus @default(PENDING_VERIFICATION)
+
+  mfaEnabled        Boolean   @default(false)
+  mfaMethods        MfaMethod[]
+  mfaRecoveryCodes  MfaRecoveryCode[]
+
+  failedLoginCount  Int       @default(0)
+  lockedUntil       DateTime?
+
+  customerProfile   CustomerProfile?
+  sessions          Session[]
+  devices           Device[]
+  securityEvents    SecurityEvent[]
+  auditLogsActor    AuditLog[]        @relation("AuditActor")
+  notifications     Notification[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([email])
+  @@index([status])
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+model AdminPermission {
+  id        String     @id @default(uuid())
+  userId    String
+  user      User       @relation("PermissionHolder", fields: [userId], references: [id], onDelete: Cascade)
+  scope     AdminScope
+  grantedById String
+  grantedBy   User     @relation("PermissionGrantor", fields: [grantedById], references: [id])
+  grantedAt DateTime   @default(now())
+  revokedAt DateTime?
+
+  @@unique([userId, scope])
+  @@index([userId])
+}
+
+enum AdminScope {
+  CUSTOMERS_VIEW
+  CUSTOMERS_MANAGE
+  ACCOUNTS_VIEW
+  ACCOUNTS_MANAGE
+  TRANSACTIONS_VIEW
+  TRANSFERS_APPROVE
+  CARDS_MANAGE
+  SUPPORT_RESPOND
+  COMPLIANCE_REVIEW
+  RISK_REVIEW
+  AUDIT_LOG_VIEW
+  SETTINGS_MANAGE
+  ADMIN_MANAGE
+}
+
+// Named bundles of AdminScope used to provision a new admin quickly.
+// Kept as an application-level constant (see src/server/auth/rbac.ts), not a
+// table, because the bundle is just a convenience default — the source of
+// truth for what an admin can do is always their individual AdminPermission
+// rows, never a role name.
+model MfaMethod {
+  id          String     @id @default(uuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type        MfaType
+  // Encrypted at rest (envelope encryption) — never stored or logged plaintext.
+  secretEnc   String?
+  phoneNumber String?
+  verifiedAt  DateTime?
+  createdAt   DateTime   @default(now())
+
+  @@index([userId])
+}
+
+enum MfaType {
+  TOTP
+  SMS
+  WEBAUTHN
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// Session cookie holds a random opaque token; `id` is sha256(token) so the
+// raw token is never stored server-side (see src/server/auth/session.ts).
+model Session {
+  id            String    @id
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceId      String?
+  device        Device?   @relation(fields: [deviceId], references: [id])
+  ipAddress     String
+  userAgent     String
+  mfaVerifiedAt DateTime?
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  revokedReason String?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Device {
+  id          String    @id @default(uuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fingerprint String
+  name        String?
+  trusted     Boolean   @default(false)
+  firstSeenAt DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  sessions    Session[]
+
+  @@unique([userId, fingerprint])
+}
+
+model SecurityEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  type      SecurityEventType
+  ipAddress String
+  userAgent String?
+  metadata  Json?
+  riskScore Int?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([type, createdAt])
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  LOGIN_NEW_DEVICE
+  LOGIN_IMPOSSIBLE_TRAVEL
+  PASSWORD_CHANGED
+  PASSWORD_RESET_REQUESTED
+  PASSWORD_RESET_COMPLETED
+  MFA_ENABLED
+  MFA_DISABLED
+  MFA_CHALLENGE_FAILED
+  MFA_CHALLENGE_SUCCESS
+  ACCOUNT_LOCKED
+  ACCOUNT_UNLOCKED
+  SESSION_REVOKED
+  RATE_LIMIT_EXCEEDED
+  CSRF_REJECTED
+}
+
+model EmailVerificationToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// CUSTOMER / KYC
+// ---------------------------------------------------------------------------
+
+model CustomerProfile {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  legalFirstName String
+  legalLastName  String
+  dateOfBirth    DateTime
+  taxIdEnc       String?
+
+  addressLine1   String
+  addressLine2   String?
+  city           String
+  region         String
+  postalCode     String
+  country        String   @db.Char(2)
+
+  segment        CustomerSegment @default(PERSONAL)
+  kyc            KycRecord?
+
+  accounts       Account[]
+  beneficiaries  Beneficiary[]
+  transactions   Transaction[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+enum CustomerSegment {
+  PERSONAL
+  PRIVATE
+  BUSINESS
+}
+
+model KycRecord {
+  id                String   @id @default(uuid())
+  customerProfileId String   @unique
+  customerProfile   CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+
+  status            KycStatus @default(NOT_STARTED)
+  provider          String?
+  providerCaseId    String?
+  riskRating        RiskRating?
+  documents         KycDocument[]
+
+  submittedAt       DateTime?
+  decidedAt         DateTime?
+  expiresAt         DateTime?
+  rejectionReason   String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+enum KycStatus {
+  NOT_STARTED
+  PENDING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum RiskRating {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model KycDocument {
+  id          String   @id @default(uuid())
+  kycRecordId String
+  kycRecord   KycRecord @relation(fields: [kycRecordId], references: [id], onDelete: Cascade)
+  type        KycDocumentType
+  storageRef  String
+  status      KycDocumentStatus @default(PENDING)
+  uploadedAt  DateTime @default(now())
+  reviewedAt  DateTime?
+}
+
+enum KycDocumentType {
+  GOVERNMENT_ID
+  PROOF_OF_ADDRESS
+  BUSINESS_REGISTRATION
+  BENEFICIAL_OWNERSHIP
+  SELFIE_LIVENESS
+}
+
+enum KycDocumentStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+// ---------------------------------------------------------------------------
+// ACCOUNTS
+// ---------------------------------------------------------------------------
+
+model Account {
+  id                   String   @id @default(uuid())
+  customerProfileId    String
+  customerProfile      CustomerProfile @relation(fields: [customerProfileId], references: [id])
+
+  type                 AccountType
+  displayName          String
+  currency             String   @db.Char(3)
+
+  providerName         String?  // which provider this account lives at, once opened
+  providerAccountRef   String?  @unique
+  maskedNumber         String?
+
+  status               AccountStatus @default(PENDING)
+
+  cachedBalanceMinor   BigInt?
+  cachedAvailableMinor BigInt?
+  cachedAt             DateTime?
+
+  beneficiaryOf        Beneficiary[]  @relation("BeneficiaryAccount")
+  transactionsFrom     Transaction[]  @relation("SourceAccount")
+  transactionsTo       Transaction[]  @relation("DestinationAccount")
+  cards                Card[]
+  statements           Statement[]
+
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([customerProfileId])
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  BUSINESS
+}
+
+enum AccountStatus {
+  PENDING
+  ACTIVE
+  RESTRICTED
+  CLOSED
+}
+
+model Beneficiary {
+  id                String   @id @default(uuid())
+  customerProfileId String
+  customerProfile   CustomerProfile @relation(fields: [customerProfileId], references: [id], onDelete: Cascade)
+
+  name              String
+  relationship      String?
+  bankName          String
+  accountNumberEnc  String
+  routingInfoEnc    String?
+
+  linkedAccountId   String?
+  linkedAccount     Account? @relation("BeneficiaryAccount", fields: [linkedAccountId], references: [id])
+
+  status            BeneficiaryStatus @default(PENDING_VERIFICATION)
+  transfers         Transaction[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([customerProfileId])
+}
+
+enum BeneficiaryStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  BLOCKED
+}
+
+// ---------------------------------------------------------------------------
+// TRANSACTIONS
+// ---------------------------------------------------------------------------
+
+model Transaction {
+  id                   String   @id @default(uuid())
+  idempotencyKey       String   @unique
+
+  customerProfileId    String
+  customerProfile      CustomerProfile @relation(fields: [customerProfileId], references: [id])
+  sourceAccountId      String?
+  sourceAccount        Account? @relation("SourceAccount", fields: [sourceAccountId], references: [id])
+  destinationAccountId String?
+  destinationAccount   Account? @relation("DestinationAccount", fields: [destinationAccountId], references: [id])
+  beneficiaryId        String?
+  beneficiary          Beneficiary? @relation(fields: [beneficiaryId], references: [id])
+
+  type                 TransactionType
+  direction            TransactionDirection
+  amountMinor          BigInt
+  currency             String   @db.Char(3)
+  feeMinor             BigInt   @default(0)
+
+  status               TransactionStatus @default(INITIATED)
+  reference            String
+  description          String?
+
+  provider             String?
+  providerRequestId    String?
+  providerTxnRef       String?
+  providerStatus       String?
+  failureReason        String?
+
+  riskScore            Int?
+  riskFlags            Json?
+
+  initiatedAt          DateTime @default(now())
+  authorizedAt         DateTime?
+  settledAt            DateTime?
+  failedAt             DateTime?
+
+  statusHistory        TransactionStatusEvent[]
+  auditLogs            AuditLog[]
+
+  @@index([customerProfileId, initiatedAt])
+  @@index([status])
+  @@index([providerTxnRef])
+}
+
+enum TransactionType {
+  INTERNAL_TRANSFER
+  EXTERNAL_TRANSFER
+  CARD_PAYMENT
+  DEPOSIT
+  FEE
+  INTEREST
+  ADJUSTMENT
+}
+
+enum TransactionDirection {
+  DEBIT
+  CREDIT
+}
+
+enum TransactionStatus {
+  INITIATED
+  PENDING_RISK_REVIEW
+  AUTHORIZED
+  SUBMITTED_TO_PROVIDER
+  SETTLED
+  FAILED
+  REJECTED
+  REVERSED
+}
+
+model TransactionStatusEvent {
+  id            String   @id @default(uuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  fromStatus    TransactionStatus?
+  toStatus      TransactionStatus
+  reason        String?
+  actor         String
+  createdAt     DateTime @default(now())
+
+  @@index([transactionId])
+}
+
+// ---------------------------------------------------------------------------
+// CARDS
+// ---------------------------------------------------------------------------
+
+model Card {
+  id              String     @id @default(uuid())
+  accountId       String
+  account         Account    @relation(fields: [accountId], references: [id])
+
+  providerCardRef String?    @unique
+  last4           String?
+  network         String?
+  type            CardType
+  status          CardStatus @default(PENDING_ISSUANCE)
+
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([accountId])
+}
+
+enum CardType {
+  DEBIT
+  CREDIT
+  BUSINESS
+}
+
+enum CardStatus {
+  PENDING_ISSUANCE
+  ACTIVE
+  FROZEN
+  LOCKED
+  CANCELLED
+}
+
+// ---------------------------------------------------------------------------
+// STATEMENTS & NOTIFICATIONS
+// ---------------------------------------------------------------------------
+
+model Statement {
+  id          String   @id @default(uuid())
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id])
+  periodStart DateTime
+  periodEnd   DateTime
+  storageRef  String?
+  status      StatementStatus @default(GENERATING)
+  generatedAt DateTime?
+
+  @@index([accountId, periodStart])
+}
+
+enum StatementStatus {
+  GENERATING
+  READY
+  FAILED
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// AUDIT & RATE LIMITING
+// ---------------------------------------------------------------------------
+
+// Append-only: the application's runtime database role has INSERT but not
+// UPDATE/DELETE on this table (enforced in the deployment migration, see
+// docs/production/07-security-architecture.md §7).
+model AuditLog {
+  id            String   @id @default(uuid())
+  actorUserId   String?
+  actor         User?    @relation("AuditActor", fields: [actorUserId], references: [id])
+  actorRole     UserRole?
+  action        String
+  targetType    String
+  targetId      String
+  transactionId String?
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  ipAddress     String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+
+  @@index([actorUserId, createdAt])
+  @@index([targetType, targetId])
+  @@index([createdAt])
+}
+
+// Fixed-window counter backing src/server/security/rateLimiter.ts. Single
+// Postgres table is sufficient for a single-instance deployment; the
+// RateLimiter interface it sits behind can be swapped for a Redis-backed
+// implementation for multi-instance production without touching callers.
+model RateLimitBucket {
+  key       String   @id
+  count     Int      @default(0)
+  resetAt   DateTime
+
+  @@index([resetAt])
+}
