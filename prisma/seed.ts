@@ -10,7 +10,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import * as argon2 from "argon2";
-import { grantScopes } from "../src/server/auth/rbac";
+import { grantScopes } from "../src/server/auth/rbacCore";
 
 const prisma = new PrismaClient();
 
