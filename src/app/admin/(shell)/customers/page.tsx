@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search } from "lucide-react";
 import { PageHeading } from "@/components/dashboard/PageHeading";
 import { Badge } from "@/components/dashboard/Badge";
@@ -19,6 +20,7 @@ type Customer = {
 const statusTone = { ACTIVE: "positive", PENDING_VERIFICATION: "gold", SUSPENDED: "negative", CLOSED: "neutral" } as const;
 
 export default function AdminCustomersPage() {
+  const router = useRouter();
   const [customers, setCustomers] = useState<Customer[] | null>(null);
   const [query, setQuery] = useState("");
 
@@ -66,7 +68,11 @@ export default function AdminCustomersPage() {
               <tr><td colSpan={5} className="px-6 py-10 text-center text-mist">No customers yet.</td></tr>
             )}
             {filtered.map((c) => (
-              <tr key={c.id} className="border-b border-line last:border-0 hover:bg-ink-4/50">
+              <tr
+                key={c.id}
+                onClick={() => router.push(`/admin/customers/${c.id}`)}
+                className="cursor-pointer border-b border-line last:border-0 hover:bg-ink-4/50"
+              >
                 <td className="px-6 py-4">
                   <p className="text-ivory">{c.legalFirstName} {c.legalLastName}</p>
                   <p className="text-xs text-mist">{c.user.email}</p>

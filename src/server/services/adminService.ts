@@ -1,9 +1,10 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { grantScopes, revokeScopes } from "../auth/rbac";
 import { writeAuditLog } from "../security/audit";
-import { NotFoundError, ValidationError } from "../security/errors";
-import type { AdminScope, UserRole } from "@prisma/client";
+import { ConflictError, NotFoundError, ValidationError } from "../security/errors";
+import type { AdminScope, KycStatus, UserRole, UserStatus } from "@prisma/client";
 
 /**
  * Admin-facing operations. Every mutating function here writes an
@@ -32,13 +33,114 @@ export async function getCustomerDetail(customerProfileId: string) {
   const profile = await prisma.customerProfile.findUnique({
     where: { id: customerProfileId },
     include: {
-      user: { select: { email: true, status: true, mfaEnabled: true, createdAt: true } },
+      user: { select: { id: true, email: true, status: true, mfaEnabled: true, createdAt: true } },
       kyc: true,
       accounts: true,
+      // Recent transactions across all of this customer's accounts, so the
+      // admin detail page can show a manual credit's effect (new Transaction
+      // row + updated account balance) immediately after applying it.
+      transactions: {
+        orderBy: { initiatedAt: "desc" },
+        take: 25,
+        include: { sourceAccount: true, destinationAccount: true },
+      },
     },
   });
   if (!profile) throw new NotFoundError("Customer not found.");
   return profile;
+}
+
+/** Edits customer-level fields an admin can correct or manage: legal name,
+ * email, KYC status, and account standing (User.status — ACTIVE/SUSPENDED/
+ * etc., not to be confused with an individual bank Account's status).
+ * Writes one AuditLog entry capturing exactly which fields changed, from
+ * what to what — never a silent update. Fields the caller omits are left
+ * untouched; fields that are present but unchanged are skipped from both
+ * the write and the audit metadata, so the log only ever reflects real
+ * changes. */
+export async function updateCustomerDetails(params: {
+  customerProfileId: string;
+  legalFirstName?: string;
+  legalLastName?: string;
+  email?: string;
+  kycStatus?: KycStatus;
+  userStatus?: UserStatus;
+  actorUserId: string;
+  actorRole: UserRole;
+}) {
+  const profile = await prisma.customerProfile.findUnique({
+    where: { id: params.customerProfileId },
+    include: { user: true, kyc: true },
+  });
+  if (!profile) throw new NotFoundError("Customer not found.");
+
+  const changes: Record<string, { from: string; to: string }> = {};
+  if (params.legalFirstName !== undefined && params.legalFirstName !== profile.legalFirstName) {
+    changes.legalFirstName = { from: profile.legalFirstName, to: params.legalFirstName };
+  }
+  if (params.legalLastName !== undefined && params.legalLastName !== profile.legalLastName) {
+    changes.legalLastName = { from: profile.legalLastName, to: params.legalLastName };
+  }
+  if (params.email !== undefined && params.email !== profile.user.email) {
+    changes.email = { from: profile.user.email, to: params.email };
+  }
+  const currentKycStatus = profile.kyc?.status ?? "NOT_STARTED";
+  if (params.kycStatus !== undefined && params.kycStatus !== currentKycStatus) {
+    changes.kycStatus = { from: currentKycStatus, to: params.kycStatus };
+  }
+  if (params.userStatus !== undefined && params.userStatus !== profile.user.status) {
+    changes.userStatus = { from: profile.user.status, to: params.userStatus };
+  }
+
+  if (Object.keys(changes).length === 0) {
+    return getCustomerDetail(params.customerProfileId);
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      if (params.legalFirstName !== undefined || params.legalLastName !== undefined) {
+        await tx.customerProfile.update({
+          where: { id: params.customerProfileId },
+          data: {
+            ...(params.legalFirstName !== undefined ? { legalFirstName: params.legalFirstName } : {}),
+            ...(params.legalLastName !== undefined ? { legalLastName: params.legalLastName } : {}),
+          },
+        });
+      }
+      if (params.email !== undefined || params.userStatus !== undefined) {
+        await tx.user.update({
+          where: { id: profile.userId },
+          data: {
+            ...(params.email !== undefined ? { email: params.email } : {}),
+            ...(params.userStatus !== undefined ? { status: params.userStatus } : {}),
+          },
+        });
+      }
+      if (params.kycStatus !== undefined) {
+        await tx.kycRecord.upsert({
+          where: { customerProfileId: params.customerProfileId },
+          create: { customerProfileId: params.customerProfileId, status: params.kycStatus },
+          update: { status: params.kycStatus },
+        });
+      }
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new ConflictError("Another account already uses this email address.");
+    }
+    throw error;
+  }
+
+  await writeAuditLog({
+    actorUserId: params.actorUserId,
+    actorRole: params.actorRole,
+    action: "customer.details_updated",
+    targetType: "CustomerProfile",
+    targetId: params.customerProfileId,
+    metadata: { changes },
+  });
+
+  return getCustomerDetail(params.customerProfileId);
 }
 
 export async function listAllAccounts(params: { limit?: number }) {

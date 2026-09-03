@@ -338,6 +338,132 @@ export async function createInternalTransfer(input: CreateInternalTransferInput)
   return prisma.transaction.findUniqueOrThrow({ where: { id: transaction.id } });
 }
 
+export type CreateAdminAccountCreditInput = {
+  idempotencyKey: string;
+  accountId: string;
+  amountMinor: bigint;
+  reason: string;
+  actorUserId: string;
+  actorRole: UserRole;
+  ipAddress: string;
+};
+
+/**
+ * Admin-only tool: adds fake demo money directly to an account's internal
+ * ledger balance, since there's no real banking provider connected to fund
+ * accounts through. Deliberately separate from createInternalTransfer/
+ * createExternalTransfer above — this never claims to represent money
+ * entering Granger Bank from anywhere real, and refuses any account with a
+ * providerAccountRef set, since that account's balance would be
+ * provider-authoritative and this internal tool has no business touching
+ * it. Always creates a real, auditable Transaction (type: ADJUSTMENT,
+ * direction: CREDIT) plus an AuditLog entry — never a silent balance edit,
+ * per the explicit requirement this exists to satisfy.
+ */
+export async function createAdminAccountCredit(input: CreateAdminAccountCreditInput) {
+  if (input.amountMinor <= BigInt(0)) {
+    throw new ValidationError("Credit amount must be greater than zero.");
+  }
+
+  // --- Idempotency: a second request with the same key (e.g. an admin's
+  // double-click) returns the first request's transaction rather than
+  // crediting twice. ---
+  const existing = await prisma.transaction.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+  if (existing) return existing;
+
+  const account = await prisma.account.findUnique({ where: { id: input.accountId } });
+  if (!account) throw new NotFoundError("Account not found.");
+  if (account.providerAccountRef) {
+    throw new ValidationError(
+      "This account is connected to a real banking provider. The demo credit tool only works on accounts with no provider connected."
+    );
+  }
+  if (account.status !== "ACTIVE") {
+    throw new ValidationError("The account is not active.");
+  }
+
+  let transaction;
+  try {
+    transaction = await prisma.transaction.create({
+      data: {
+        idempotencyKey: input.idempotencyKey,
+        customerProfileId: account.customerProfileId,
+        destinationAccountId: account.id,
+        type: "ADJUSTMENT",
+        direction: "CREDIT",
+        amountMinor: input.amountMinor,
+        currency: account.currency,
+        reference: "Admin demo credit",
+        description: input.reason,
+        status: "INITIATED",
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      // Lost the race to a concurrent identical request — return its result.
+      const winner = await prisma.transaction.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+      if (winner) return winner;
+    }
+    throw error;
+  }
+
+  await prisma.transactionStatusEvent.create({
+    data: { transactionId: transaction.id, fromStatus: null, toStatus: "INITIATED", actor: input.actorUserId },
+  });
+
+  await prisma.$transaction(async (tx) => {
+    // internalLedgerBalanceMinor is nullable (an account that's never been
+    // funded has no ledger balance at all yet) — a plain Prisma `increment`
+    // translates to SQL `x = x + $amount`, and NULL + anything is NULL in
+    // Postgres, which would silently discard a first-ever credit while
+    // still recording a SETTLED transaction claiming it happened. Backfill
+    // null to 0 first, in the same transaction, before incrementing.
+    await tx.account.updateMany({
+      where: { id: account.id, internalLedgerBalanceMinor: null },
+      data: { internalLedgerBalanceMinor: BigInt(0) },
+    });
+    await tx.account.update({
+      where: { id: account.id },
+      data: { internalLedgerBalanceMinor: { increment: input.amountMinor } },
+    });
+
+    await tx.transaction.update({
+      where: { id: transaction.id },
+      data: { status: "SETTLED", authorizedAt: new Date(), settledAt: new Date() },
+    });
+    await tx.transactionStatusEvent.createMany({
+      data: [
+        { transactionId: transaction.id, fromStatus: "INITIATED", toStatus: "AUTHORIZED", actor: input.actorUserId },
+        {
+          transactionId: transaction.id,
+          fromStatus: "AUTHORIZED",
+          toStatus: "SETTLED",
+          actor: input.actorUserId,
+          reason: "admin_demo_credit",
+        },
+      ],
+    });
+  });
+
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    actorRole: input.actorRole,
+    action: "account.admin_credit_applied",
+    targetType: "Account",
+    targetId: account.id,
+    transactionId: transaction.id,
+    ipAddress: input.ipAddress,
+    metadata: {
+      amountMinor: input.amountMinor.toString(),
+      currency: account.currency,
+      reason: input.reason,
+      customerProfileId: account.customerProfileId,
+    },
+  });
+
+  return prisma.transaction.findUniqueOrThrow({ where: { id: transaction.id } });
+}
+
 /** Admin action on a transaction held in PENDING_RISK_REVIEW. Moving it to
  * AUTHORIZED still does not move any money — the next step is the same
  * fail-closed PaymentProvider submission every transfer goes through. See
