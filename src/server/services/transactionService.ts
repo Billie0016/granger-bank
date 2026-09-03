@@ -9,8 +9,11 @@ import { ForbiddenError, NotFoundError, ValidationError } from "../security/erro
 import type { TransactionStatus, UserRole } from "@prisma/client";
 
 /**
- * Transfer orchestration implementing the state machine and idempotency
- * design in docs/production/05-transaction-architecture.md.
+ * External transfer orchestration implementing the state machine and
+ * idempotency design in docs/production/05-transaction-architecture.md.
+ * Always goes to a saved Beneficiary — money leaving Granger Bank entirely,
+ * as opposed to createInternalTransfer below, which moves fake seeded money
+ * between two of a customer's own Granger Bank accounts.
  *
  * This function NEVER writes to Account.cachedBalanceMinor as a side
  * effect of "success" — there is no success path here that isn't gated by
@@ -21,12 +24,11 @@ import type { TransactionStatus, UserRole } from "@prisma/client";
  * not a bug to work around.
  */
 
-export type CreateTransferInput = {
+export type CreateExternalTransferInput = {
   idempotencyKey: string;
   customerProfileId: string;
   sourceAccountId: string;
-  destinationAccountId?: string;
-  beneficiaryId?: string;
+  beneficiaryId: string;
   amountMinor: bigint;
   currency: string;
   reference: string;
@@ -54,11 +56,7 @@ async function transitionStatus(transactionId: string, toStatus: TransactionStat
   ]);
 }
 
-export async function createTransfer(input: CreateTransferInput) {
-  if (!input.destinationAccountId && !input.beneficiaryId) {
-    throw new ValidationError("A transfer must have either a destination account or a beneficiary.");
-  }
-
+export async function createExternalTransfer(input: CreateExternalTransferInput) {
   // --- Idempotency: a second request with the same key returns the first
   // request's transaction rather than creating a duplicate or erroring. ---
   const existing = await prisma.transaction.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
@@ -70,21 +68,14 @@ export async function createTransfer(input: CreateTransferInput) {
     throw new ValidationError("The source account is not active.");
   }
 
-  if (input.destinationAccountId) {
-    await assertAccountOwnership(input.destinationAccountId, input.customerProfileId);
+  const beneficiary = await prisma.beneficiary.findUnique({ where: { id: input.beneficiaryId } });
+  if (!beneficiary || beneficiary.customerProfileId !== input.customerProfileId) {
+    throw new ForbiddenError();
   }
-
-  let beneficiary = null;
-  if (input.beneficiaryId) {
-    beneficiary = await prisma.beneficiary.findUnique({ where: { id: input.beneficiaryId } });
-    if (!beneficiary || beneficiary.customerProfileId !== input.customerProfileId) {
-      throw new ForbiddenError();
-    }
-    if (beneficiary.status !== "VERIFIED") {
-      throw new ValidationError(
-        "This beneficiary has not completed verification yet and cannot receive transfers."
-      );
-    }
+  if (beneficiary.status !== "VERIFIED") {
+    throw new ValidationError(
+      "This beneficiary has not completed verification yet and cannot receive transfers."
+    );
   }
 
   // --- Create the transaction record (INITIATED). Unique constraint on
@@ -96,9 +87,8 @@ export async function createTransfer(input: CreateTransferInput) {
         idempotencyKey: input.idempotencyKey,
         customerProfileId: input.customerProfileId,
         sourceAccountId: input.sourceAccountId,
-        destinationAccountId: input.destinationAccountId,
         beneficiaryId: input.beneficiaryId,
-        type: input.destinationAccountId ? "INTERNAL_TRANSFER" : "EXTERNAL_TRANSFER",
+        type: "EXTERNAL_TRANSFER",
         direction: "DEBIT",
         amountMinor: input.amountMinor,
         currency: input.currency,
@@ -135,7 +125,7 @@ export async function createTransfer(input: CreateTransferInput) {
       customerProfileId: input.customerProfileId,
       amountMinor: input.amountMinor,
       currency: input.currency,
-      destinationDescriptor: beneficiary?.name ?? input.destinationAccountId ?? "internal",
+      destinationDescriptor: beneficiary.name,
     });
     await prisma.transaction.update({ where: { id: transaction.id }, data: { riskScore: risk.score, riskFlags: risk.flags } });
     if (risk.score >= 80) {
@@ -160,7 +150,6 @@ export async function createTransfer(input: CreateTransferInput) {
     const result = await provider.submitTransfer({
       providerRequestId: transaction.idempotencyKey,
       sourceAccountRef: sourceAccount.providerAccountRef ?? "",
-      destinationAccountRef: input.destinationAccountId ?? undefined,
       amountMinor: input.amountMinor,
       currency: input.currency,
       reference: input.reference,
@@ -192,6 +181,154 @@ export async function createTransfer(input: CreateTransferInput) {
     actorUserId: input.actorUserId,
     actorRole: input.actorRole,
     action: "transaction.provider_submission_result",
+    targetType: "Transaction",
+    targetId: transaction.id,
+    transactionId: transaction.id,
+    ipAddress: input.ipAddress,
+  });
+
+  return prisma.transaction.findUniqueOrThrow({ where: { id: transaction.id } });
+}
+
+export type CreateInternalTransferInput = {
+  idempotencyKey: string;
+  customerProfileId: string;
+  sourceAccountId: string;
+  destinationAccountId: string;
+  amountMinor: bigint;
+  currency: string;
+  reference: string;
+  description?: string;
+  actorUserId: string;
+  actorRole: UserRole;
+  ipAddress: string;
+};
+
+/**
+ * Moves fake seeded money between two of a customer's own Granger Bank
+ * accounts, instantly and atomically — deliberately different from
+ * createExternalTransfer above. That function's entire point is to fail
+ * honestly because no real payment provider is connected in this build;
+ * this one exists because internal transfers never leave Granger Bank, so
+ * there is nothing for a provider to do — Granger Bank is its own source of
+ * truth for its own accounts' balances (see internalLedgerBalanceMinor in
+ * schema.prisma), no different from any real bank's core ledger settling a
+ * between-your-own-accounts transfer immediately.
+ */
+export async function createInternalTransfer(input: CreateInternalTransferInput) {
+  if (input.amountMinor <= BigInt(0)) {
+    throw new ValidationError("Transfer amount must be greater than zero.");
+  }
+  if (input.sourceAccountId === input.destinationAccountId) {
+    throw new ValidationError("Source and destination accounts must be different.");
+  }
+
+  // --- Idempotency: a second request with the same key returns the first
+  // request's transaction rather than creating a duplicate or erroring. ---
+  const existing = await prisma.transaction.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+  if (existing) return existing;
+
+  // --- Ownership checks (server-side, always) — both accounts must belong
+  // to the calling customer. This function does not support sending to a
+  // different customer's account; that would need its own authorization
+  // and recipient-lookup design, deliberately out of scope here. ---
+  const sourceAccount = await assertAccountOwnership(input.sourceAccountId, input.customerProfileId);
+  const destinationAccount = await assertAccountOwnership(input.destinationAccountId, input.customerProfileId);
+
+  if (sourceAccount.status !== "ACTIVE") {
+    throw new ValidationError("The source account is not active.");
+  }
+  if (destinationAccount.status !== "ACTIVE") {
+    throw new ValidationError("The destination account is not active.");
+  }
+  if (sourceAccount.currency !== input.currency || destinationAccount.currency !== input.currency) {
+    throw new ValidationError("Currency mismatch between the accounts and the transfer request.");
+  }
+
+  // --- Create the transaction record (INITIATED). Unique constraint on
+  // idempotencyKey protects against a concurrent duplicate race. ---
+  let transaction;
+  try {
+    transaction = await prisma.transaction.create({
+      data: {
+        idempotencyKey: input.idempotencyKey,
+        customerProfileId: input.customerProfileId,
+        sourceAccountId: input.sourceAccountId,
+        destinationAccountId: input.destinationAccountId,
+        type: "INTERNAL_TRANSFER",
+        direction: "DEBIT",
+        amountMinor: input.amountMinor,
+        currency: input.currency,
+        reference: input.reference,
+        description: input.description,
+        status: "INITIATED",
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      // Lost the race to a concurrent identical request — return its result.
+      const winner = await prisma.transaction.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+      if (winner) return winner;
+    }
+    throw error;
+  }
+
+  await prisma.transactionStatusEvent.create({
+    data: { transactionId: transaction.id, fromStatus: null, toStatus: "INITIATED", actor: "system" },
+  });
+
+  // --- The atomic debit/credit. The conditional updateMany (WHERE balance
+  // >= amount) is the compare-and-swap that makes this race-safe: two
+  // concurrent transfers debiting the same account can't both pass an
+  // application-level "read balance, check, then write" check against a
+  // balance that's gone stale between the read and the write — Postgres
+  // evaluates the WHERE clause and applies the UPDATE atomically, in one
+  // statement. Wrapping both writes (plus the status transition) in
+  // prisma.$transaction means they all commit together or all roll back
+  // together — never a partial transfer, per the explicit requirement. ---
+  try {
+    await prisma.$transaction(async (tx) => {
+      const debited = await tx.account.updateMany({
+        where: { id: sourceAccount.id, internalLedgerBalanceMinor: { gte: input.amountMinor } },
+        data: { internalLedgerBalanceMinor: { decrement: input.amountMinor } },
+      });
+      if (debited.count === 0) {
+        throw new ValidationError("This transfer would overdraw the source account.");
+      }
+
+      await tx.account.update({
+        where: { id: destinationAccount.id },
+        data: { internalLedgerBalanceMinor: { increment: input.amountMinor } },
+      });
+
+      const current = await tx.transaction.findUniqueOrThrow({ where: { id: transaction.id } });
+      await tx.transaction.update({
+        where: { id: transaction.id },
+        data: { status: "SETTLED", authorizedAt: new Date(), settledAt: new Date() },
+      });
+      await tx.transactionStatusEvent.createMany({
+        data: [
+          { transactionId: transaction.id, fromStatus: current.status, toStatus: "AUTHORIZED", actor: "system" },
+          {
+            transactionId: transaction.id,
+            fromStatus: "AUTHORIZED",
+            toStatus: "SETTLED",
+            actor: "system",
+            reason: "internal_ledger_transfer",
+          },
+        ],
+      });
+    });
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    await transitionStatus(transaction.id, "FAILED", error.message, "system");
+    return prisma.transaction.findUniqueOrThrow({ where: { id: transaction.id } });
+  }
+
+  await writeAuditLog({
+    actorUserId: input.actorUserId,
+    actorRole: input.actorRole,
+    action: "transaction.internal_transfer_settled",
     targetType: "Transaction",
     targetId: transaction.id,
     transactionId: transaction.id,

@@ -15,6 +15,7 @@ export type Account = {
   cachedBalanceMinor: string | null;
   cachedAvailableMinor: string | null;
   cachedAt: string | null;
+  internalLedgerBalanceMinor: string | null;
 };
 
 export type TransactionStatus =

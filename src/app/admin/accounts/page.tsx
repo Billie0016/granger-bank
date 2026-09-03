@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { PageHeading } from "@/components/dashboard/PageHeading";
 import { Badge } from "@/components/dashboard/Badge";
 import { apiFetch } from "@/lib/apiClient";
-import { formatMinor } from "@/lib/money";
+import { formatMinor, getDisplayBalanceMinor } from "@/lib/money";
 
 type AdminAccount = {
   id: string;
@@ -13,6 +13,7 @@ type AdminAccount = {
   currency: string;
   status: string;
   cachedBalanceMinor: string | null;
+  internalLedgerBalanceMinor: string | null;
   customerProfile: { legalFirstName: string; legalLastName: string };
 };
 
@@ -51,7 +52,7 @@ export default function AdminAccountsPage() {
                   <Badge tone={statusTone[acc.status as keyof typeof statusTone] ?? "neutral"}>{acc.status}</Badge>
                 </td>
                 <td className="px-6 py-4 text-right tabular-nums text-ivory">
-                  {acc.cachedBalanceMinor !== null ? formatMinor(acc.cachedBalanceMinor, acc.currency) : "—"}
+                  {formatMinor(getDisplayBalanceMinor(acc), acc.currency)}
                 </td>
               </tr>
             ))}

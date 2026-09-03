@@ -351,6 +351,17 @@ model Account {
   cachedAvailableMinor BigInt?
   cachedAt             DateTime?
 
+  // Granger Bank's own internal ledger balance — authoritative for accounts
+  // with no providerAccountRef (i.e. every account in this build, since no
+  // real banking provider is connected). Null until an account is actually
+  // funded through an internal-ledger operation: seed data, or
+  // createInternalTransfer's atomic debit/credit (see
+  // src/server/services/transactionService.ts). Once a real provider is
+  // eventually connected for an account, cachedBalanceMinor above becomes
+  // authoritative instead and this field stops being read for display — see
+  // getDisplayBalanceMinor() in src/lib/money.ts.
+  internalLedgerBalanceMinor BigInt?
+
   beneficiaryOf        Beneficiary[]  @relation("BeneficiaryAccount")
   transactionsFrom     Transaction[]  @relation("SourceAccount")
   transactionsTo       Transaction[]  @relation("DestinationAccount")

@@ -14,7 +14,7 @@ import { PageHeading } from "@/components/dashboard/PageHeading";
 import { Badge } from "@/components/dashboard/Badge";
 import { Button } from "@/components/ui/Button";
 import { apiFetch } from "@/lib/apiClient";
-import { formatMinor } from "@/lib/money";
+import { formatMinor, getDisplayBalanceMinor } from "@/lib/money";
 import type { Account, Transaction } from "@/lib/types";
 
 export default function DashboardOverviewPage() {
@@ -26,7 +26,7 @@ export default function DashboardOverviewPage() {
     apiFetch<{ transactions: Transaction[] }>("/api/transactions").then((d) => setTransactions(d.transactions));
   }, []);
 
-  const hasLiveBalance = accounts?.some((a) => a.cachedBalanceMinor !== null);
+  const hasLiveBalance = accounts?.some((a) => getDisplayBalanceMinor(a) !== null);
 
   return (
     <div>
@@ -81,9 +81,9 @@ export default function DashboardOverviewPage() {
                   <p className="text-xs text-mist">{acc.maskedNumber ?? "Not yet provisioned"}</p>
                 </div>
                 <div className="text-right">
-                  {acc.cachedBalanceMinor !== null ? (
+                  {getDisplayBalanceMinor(acc) !== null ? (
                     <p className="font-display text-lg tabular-nums text-ivory">
-                      {formatMinor(acc.cachedBalanceMinor, acc.currency)}
+                      {formatMinor(getDisplayBalanceMinor(acc), acc.currency)}
                     </p>
                   ) : (
                     <Badge tone="gold">{acc.status === "PENDING" ? "Pending" : "Balance unavailable"}</Badge>

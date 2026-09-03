@@ -6,7 +6,7 @@ import { PageHeading } from "@/components/dashboard/PageHeading";
 import { Badge } from "@/components/dashboard/Badge";
 import { Button } from "@/components/ui/Button";
 import { apiFetch, ApiError } from "@/lib/apiClient";
-import { formatMinor } from "@/lib/money";
+import { formatMinor, getDisplayBalanceMinor } from "@/lib/money";
 import type { Account } from "@/lib/types";
 
 const TYPES: { value: Account["type"]; label: string }[] = [
@@ -118,7 +118,7 @@ export default function AccountsPage() {
             <p className="mt-1 text-xs text-mist">{acc.maskedNumber ?? "Not yet provisioned"}</p>
 
             <p className="mt-6 font-display text-3xl tabular-nums text-ivory">
-              {acc.cachedBalanceMinor !== null ? formatMinor(acc.cachedBalanceMinor, acc.currency) : "—"}
+              {formatMinor(getDisplayBalanceMinor(acc), acc.currency)}
             </p>
             <p className="mt-1 text-xs text-mist">
               {acc.cachedAt ? `As of ${new Date(acc.cachedAt).toLocaleString()}` : "No live balance available"}

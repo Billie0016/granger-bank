@@ -4,7 +4,11 @@ import { withErrorHandling, jsonOk, serializeMoney } from "@/server/http/respond
 import { assertCsrf } from "@/server/security/csrf";
 import { requireAuth, getClientIp } from "@/server/auth/guards";
 import { enforceRateLimit } from "@/server/security/rateLimiter";
-import { createTransfer, listTransactionsForCustomer } from "@/server/services/transactionService";
+import {
+  createExternalTransfer,
+  createInternalTransfer,
+  listTransactionsForCustomer,
+} from "@/server/services/transactionService";
 import { getCustomerProfileByUserId } from "@/server/services/customerService";
 import { ValidationError } from "@/server/security/errors";
 
@@ -42,15 +46,43 @@ export const POST = withErrorHandling(async (request: Request) => {
   const profile = await getCustomerProfileByUserId(ctx.user.id);
   const input = await parseJsonBody(request, createTransferSchema);
 
+  // Internal transfer between the customer's own Granger Bank accounts:
+  // settles instantly using fake seeded balances, no provider involved, so
+  // it isn't gated on KYC the way money leaving the bank is.
+  if (input.destinationAccountId) {
+    const transaction = await createInternalTransfer({
+      idempotencyKey: input.idempotencyKey,
+      sourceAccountId: input.sourceAccountId,
+      destinationAccountId: input.destinationAccountId,
+      amountMinor: BigInt(input.amountMinor),
+      currency: input.currency,
+      reference: input.reference,
+      description: input.description,
+      customerProfileId: profile.id,
+      actorUserId: ctx.user.id,
+      actorRole: ctx.user.role,
+      ipAddress: ip,
+    });
+    return jsonOk(serializeMoney({ transaction }), 201);
+  }
+
+  // External transfer to a saved beneficiary: requires a real payment
+  // provider, which is unconfigured in this build, so this honestly fails —
+  // see createExternalTransfer.
   if (profile.kyc?.status !== "APPROVED") {
     throw new ValidationError(
       "Transfers require a verified identity. Complete identity verification before sending money."
     );
   }
 
-  const transaction = await createTransfer({
-    ...input,
+  const transaction = await createExternalTransfer({
+    idempotencyKey: input.idempotencyKey,
+    sourceAccountId: input.sourceAccountId,
+    beneficiaryId: input.beneficiaryId!,
     amountMinor: BigInt(input.amountMinor),
+    currency: input.currency,
+    reference: input.reference,
+    description: input.description,
     customerProfileId: profile.id,
     actorUserId: ctx.user.id,
     actorRole: ctx.user.role,

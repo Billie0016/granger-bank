@@ -14,6 +14,43 @@ import { grantScopes } from "../src/server/auth/rbacCore";
 
 const prisma = new PrismaClient();
 
+/** Finds this customer's account of the given type, or creates one with a
+ * real Prisma-generated UUID id (never a custom string — see the comment
+ * at its call site). Not a generic upsert because Account has no unique
+ * constraint on (customerProfileId, type) to upsert against. */
+async function findOrCreateSeedAccount(params: {
+  customerProfileId: string;
+  type: "CHECKING" | "SAVINGS";
+  displayName: string;
+  maskedNumber: string;
+  internalLedgerBalanceMinor: bigint;
+}) {
+  const existing = await prisma.account.findFirst({
+    where: { customerProfileId: params.customerProfileId, type: params.type },
+  });
+  if (existing) {
+    return prisma.account.update({
+      where: { id: existing.id },
+      data: {
+        status: "ACTIVE",
+        maskedNumber: params.maskedNumber,
+        internalLedgerBalanceMinor: params.internalLedgerBalanceMinor,
+      },
+    });
+  }
+  return prisma.account.create({
+    data: {
+      customerProfileId: params.customerProfileId,
+      type: params.type,
+      currency: "USD",
+      displayName: params.displayName,
+      maskedNumber: params.maskedNumber,
+      status: "ACTIVE",
+      internalLedgerBalanceMinor: params.internalLedgerBalanceMinor,
+    },
+  });
+}
+
 function assertNotProductionDatabase() {
   const url = process.env.DATABASE_URL ?? "";
   if (process.env.NODE_ENV === "production") {
@@ -61,19 +98,39 @@ async function main() {
     customerUser.customerProfile ??
     (await prisma.customerProfile.findUniqueOrThrow({ where: { userId: customerUser.id } }));
 
-  // One PENDING account — a real record of "customer requested a checking
-  // account," not a fake funded account. No balance, no provider ref.
-  await prisma.account.upsert({
-    where: { id: `${profile.id}-checking-seed` },
-    update: {},
-    create: {
-      id: `${profile.id}-checking-seed`,
-      customerProfileId: profile.id,
-      type: "CHECKING",
-      currency: "USD",
-      displayName: "Everyday Checking",
-      status: "PENDING",
-    },
+  // Two ACTIVE, funded accounts — deliberately fake seeded money, no
+  // provider ref, so createInternalTransfer (src/server/services/
+  // transactionService.ts) has something real to move between them and the
+  // internal-transfer demo works end-to-end without a banking provider.
+  // This is an explicit, narrow exception to "no balance is fabricated"
+  // elsewhere in the app: see internalLedgerBalanceMinor in schema.prisma.
+  //
+  // A previous version of this script upserted by a custom deterministic
+  // id (`${profile.id}-checking-seed`) instead of letting Prisma generate
+  // Account.id's real UUID (its @default(uuid())). That silently broke
+  // every transfer through this account: the API validates account ids
+  // with a strict uuidSchema (see src/server/security/validation.ts) and
+  // rejected the custom id as invalid input. Delete any leftover rows in
+  // that old shape before find-or-creating properly, so re-running this
+  // script against a database seeded by the old version self-heals.
+  await prisma.account.deleteMany({
+    where: { id: { in: [`${profile.id}-checking-seed`, `${profile.id}-savings-seed`] } },
+  });
+
+  await findOrCreateSeedAccount({
+    customerProfileId: profile.id,
+    type: "CHECKING",
+    displayName: "Everyday Checking",
+    maskedNumber: "•••• 4821",
+    internalLedgerBalanceMinor: BigInt(245000), // $2,450.00
+  });
+
+  await findOrCreateSeedAccount({
+    customerProfileId: profile.id,
+    type: "SAVINGS",
+    displayName: "High-Yield Savings",
+    maskedNumber: "•••• 7743",
+    internalLedgerBalanceMinor: BigInt(890000), // $8,900.00
   });
 
   // --- Demo admin (Super Admin bundle) --------------------------------
@@ -111,6 +168,7 @@ async function main() {
 
   console.log("Seed complete.");
   console.log("  Customer login: demo.customer@seed.grangerbank.internal / DemoPassword123");
+  console.log("    Everyday Checking: $2,450.00 · High-Yield Savings: $8,900.00 (fake seeded money)");
   console.log("  Admin login:    demo.admin@seed.grangerbank.internal / DemoPassword123");
   console.log("  (Admin MFA is not enrolled yet — enroll it from Security settings; the");
   console.log("   admin console requires a completed MFA challenge on every session.)");
