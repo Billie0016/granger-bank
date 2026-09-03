@@ -84,7 +84,7 @@ export function LoginPageClient() {
           </p>
         </div>
 
-        <p className="relative z-10 text-xs text-mist">
+        <p className="relative z-10 text-[10px] text-[#454b56]">
           © 2026 Granger Bank — a fictional platform for demonstration purposes.
         </p>
       </div>
@@ -162,7 +162,7 @@ export function LoginPageClient() {
             </p>
           </form>
 
-          <p className="mt-9 text-center text-xs leading-relaxed text-mist-dim">
+          <p className="mt-9 text-center text-[10px] leading-relaxed text-[#454b56]">
             Granger Bank is a fictional platform created for demonstration purposes and is not a
             licensed financial institution. No real funds are held or transferred.
           </p>

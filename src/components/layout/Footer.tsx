@@ -69,7 +69,7 @@ export function Footer() {
           ))}
         </div>
 
-        <div className="mt-16 flex flex-col gap-4 border-t border-line pt-8 text-xs text-mist md:flex-row md:items-center md:justify-between">
+        <div className="mt-16 flex flex-col gap-4 border-t border-line pt-8 text-[10px] text-[#454b56] md:flex-row md:items-center md:justify-between">
           <p>© 2026 Granger Bank. A fictional institution created for demonstration purposes only.</p>
           <p>No real accounts, transactions, or funds are processed on this site.</p>
         </div>
