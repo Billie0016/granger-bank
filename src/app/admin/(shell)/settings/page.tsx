@@ -5,7 +5,7 @@ import { PageHeading } from "@/components/dashboard/PageHeading";
 import { Badge } from "@/components/dashboard/Badge";
 
 const admins = [
-  { name: "Admin User", email: "admin@grangerbank.example", role: "Super Admin" },
+  { name: "M. Whitfield", email: "m.whitfield@grangerbank.example", role: "Super Admin" },
   { name: "A. Chen", email: "a.chen@grangerbank.example", role: "Fraud & Risk" },
   { name: "R. Osei", email: "r.osei@grangerbank.example", role: "Compliance" },
 ];

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ShieldCheck, ArrowLeft, Lock } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
 import { apiFetch, ApiError } from "@/lib/apiClient";
@@ -85,7 +85,7 @@ export function LoginPageClient() {
         </div>
 
         <p className="relative z-10 text-xs text-mist">
-          © 2026 Granger Bank. Demo environment — fictional data only.
+          © 2026 Granger Bank — a fictional platform for demonstration purposes.
         </p>
       </div>
 
@@ -162,18 +162,10 @@ export function LoginPageClient() {
             </p>
           </form>
 
-          <div className="mt-9 flex items-start gap-3 rounded-xl border border-line bg-ink-3 p-4">
-            <ShieldCheck size={18} className="mt-0.5 shrink-0 text-gold" />
-            <p className="text-xs leading-relaxed text-mist">
-              This is a demo banking platform for architecture and security
-              demonstration purposes. It is not a real, licensed financial
-              institution, and no real money can be moved through it.
-            </p>
-          </div>
-
-          <div className="mt-4 flex items-center justify-center gap-2 text-xs text-mist-dim">
-            <Lock size={12} /> Real password hashing &amp; sessions · see /docs/production
-          </div>
+          <p className="mt-9 text-center text-xs leading-relaxed text-mist-dim">
+            Granger Bank is a fictional platform created for demonstration purposes and is not a
+            licensed financial institution. No real funds are held or transferred.
+          </p>
         </div>
       </div>
     </div>
