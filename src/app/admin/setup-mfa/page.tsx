@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ShieldCheck, Copy, Check } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
@@ -10,7 +9,6 @@ import { apiFetch, ApiError } from "@/lib/apiClient";
 type Step = "loading" | "scan" | "recovery" | "error";
 
 export default function AdminSetupMfaPage() {
-  const router = useRouter();
   const [step, setStep] = useState<Step>("loading");
   const [methodId, setMethodId] = useState("");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
@@ -133,8 +131,13 @@ export default function AdminSetupMfaPage() {
                 size="lg"
                 className="w-full"
                 onClick={() => {
-                  router.push("/admin");
-                  router.refresh();
+                  // Hard navigation, not router.push()+router.refresh() —
+                  // see the comment in LoginPageClient.tsx. This is exactly
+                  // the case that triggered it: /admin immediately
+                  // server-redirects again post-enrollment (to
+                  // /mfa-challenge, since the session isn't MFA-verified
+                  // yet — see src/app/admin/layout.tsx).
+                  window.location.href = "/admin";
                 }}
               >
                 Continue to Admin Console

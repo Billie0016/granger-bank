@@ -1,14 +1,13 @@
 "use client";
 
 import { Suspense, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
 import { Button } from "@/components/ui/Button";
 import { apiFetch, ApiError } from "@/lib/apiClient";
 
 function MfaChallengeForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const from = searchParams.get("from") || "/dashboard";
 
@@ -26,8 +25,11 @@ function MfaChallengeForm() {
         method: "POST",
         body: JSON.stringify({ code, isRecoveryCode: useRecoveryCode }),
       });
-      router.push(from);
-      router.refresh();
+      // Hard navigation, not router.push()+router.refresh() — see the
+      // comment in LoginPageClient.tsx for why chaining a client-side soft
+      // navigation into a destination that might itself server-redirect
+      // caused an infinite client-router re-fetch loop.
+      window.location.href = from;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {

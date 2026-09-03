@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ShieldCheck, ArrowLeft, Lock } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
@@ -11,7 +10,6 @@ import { apiFetch, ApiError } from "@/lib/apiClient";
 import { StaticCardFallback } from "@/components/three/StaticCardFallback";
 
 export function LoginPageClient() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -29,7 +27,7 @@ export function LoginPageClient() {
       });
 
       if (result.mfaRequired) {
-        router.push("/mfa-challenge");
+        window.location.href = "/mfa-challenge";
         return;
       }
 
@@ -38,8 +36,18 @@ export function LoginPageClient() {
       // vulnerability the old prototype had — see
       // docs/production/01-current-architecture-audit.md §2).
       const session = await apiFetch<{ user: { role: "CUSTOMER" | "ADMIN" } }>("/api/auth/session");
-      router.push(session.user.role === "ADMIN" ? "/admin" : "/dashboard");
-      router.refresh();
+      // A hard navigation, not router.push()+router.refresh(): the admin
+      // destination often immediately server-redirects again (to
+      // /admin/setup-mfa or /mfa-challenge, see src/app/admin/layout.tsx),
+      // and chaining a client-side soft navigation into a server redirect
+      // like that got the Next.js client router's internal state stuck,
+      // causing an infinite loop of identical RSC re-fetches on the
+      // redirect target (reproduced in both dev and a production build). A
+      // full navigation sidesteps that reconciliation path entirely, and is
+      // also simply correct here regardless: it guarantees the freshly-set
+      // session cookie is used for a clean server render rather than
+      // reusing any client-side state cached from before authentication.
+      window.location.href = session.user.role === "ADMIN" ? "/admin" : "/dashboard";
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong. Please try again.");
     } finally {

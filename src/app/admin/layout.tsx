@@ -1,36 +1,32 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
-import { DashboardShell, type NavItem } from "@/components/dashboard/DashboardShell";
 import { getAuthContext } from "@/server/auth/session";
-import { getEffectiveScopes } from "@/server/auth/rbac";
-import type { AdminScope } from "@prisma/client";
 
 // Every route under /admin depends on the request's session cookie and
 // live database state — never statically prerenderable.
 export const dynamic = "force-dynamic";
 
-// icon is a string key (see DashboardShell's NAV_ICONS), not a component
-// reference — see the comment on dashboard/layout.tsx's navItems for why.
-const ALL_NAV_ITEMS: (NavItem & { scope: AdminScope })[] = [
-  { href: "/admin", label: "Overview", icon: "LayoutDashboard", scope: "CUSTOMERS_VIEW" },
-  { href: "/admin/customers", label: "Customers", icon: "Users", scope: "CUSTOMERS_VIEW" },
-  { href: "/admin/accounts", label: "Accounts", icon: "Landmark", scope: "ACCOUNTS_VIEW" },
-  { href: "/admin/transactions", label: "Transactions", icon: "Receipt", scope: "TRANSACTIONS_VIEW" },
-  { href: "/admin/transfers", label: "Transfers", icon: "ArrowLeftRight", scope: "TRANSFERS_APPROVE" },
-  { href: "/admin/cards", label: "Cards", icon: "CreditCard", scope: "CARDS_MANAGE" },
-  { href: "/admin/support", label: "Support", icon: "LifeBuoy", scope: "SUPPORT_RESPOND" },
-  { href: "/admin/notifications", label: "Notifications", icon: "Bell", scope: "AUDIT_LOG_VIEW" },
-  { href: "/admin/audit-logs", label: "Audit Logs", icon: "ScrollText", scope: "AUDIT_LOG_VIEW" },
-  { href: "/admin/settings", label: "Settings", icon: "Settings", scope: "SETTINGS_MANAGE" },
-];
-
 /**
- * Server-side auth + RBAC gate for the entire admin console. Admin MFA is
+ * Server-side auth gate for the entire admin console. Admin MFA is
  * mandatory (docs/production/07-security-architecture.md §9): an admin who
  * hasn't enrolled MFA yet is confined to /admin/setup-mfa and nowhere else;
  * an admin whose current session hasn't completed an MFA challenge is sent
- * to the shared /mfa-challenge page. The nav is filtered to each admin's
- * actual granted scopes — no admin sees a section they can't act on.
+ * to the shared /mfa-challenge page.
+ *
+ * This layout applies to every /admin/* route, including /admin/setup-mfa,
+ * and deliberately always renders the exact same shape (just {children}) —
+ * it must NOT branch its own rendered structure on which specific page is
+ * active. An earlier version conditionally wrapped children in
+ * DashboardShell here based on a pathname string comparison, which caused
+ * an infinite client-side RSC re-fetch loop on /admin/setup-mfa (identical
+ * ?_rsc= requests firing continuously, reproducible in both dev and a
+ * production build): Next's client router doesn't expect a layout's output
+ * shape to vary per-page like that and appears to loop trying to reconcile
+ * the mismatch. The DashboardShell chrome now lives in
+ * "(shell)/layout.tsx", a route group that every admin page except
+ * setup-mfa sits inside — Next's own file-based routing decides which
+ * layout applies, instead of a manual pathname check deciding what to
+ * render.
  */
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getAuthContext();
@@ -43,17 +39,5 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!ctx.user.mfaEnabled && !isSetupMfaPage) redirect("/admin/setup-mfa");
   if (ctx.user.mfaEnabled && !ctx.session.mfaVerifiedAt) redirect("/mfa-challenge?from=/admin");
 
-  if (isSetupMfaPage) {
-    // Minimal chrome-free render for the forced enrollment step.
-    return <>{children}</>;
-  }
-
-  const scopes = await getEffectiveScopes(ctx.user.id);
-  const navItems = ALL_NAV_ITEMS.filter((item) => scopes.includes(item.scope));
-
-  return (
-    <DashboardShell navItems={navItems} roleLabel="Admin Console" userName={ctx.user.email}>
-      {children}
-    </DashboardShell>
-  );
+  return <>{children}</>;
 }
