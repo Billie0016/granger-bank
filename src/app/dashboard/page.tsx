@@ -8,7 +8,6 @@ import {
   Send,
   ArrowLeftRight,
   Plus,
-  Clock,
 } from "lucide-react";
 import { PageHeading } from "@/components/dashboard/PageHeading";
 import { Badge } from "@/components/dashboard/Badge";
@@ -46,14 +45,11 @@ export default function DashboardOverviewPage() {
       />
 
       {!hasLiveBalance && (
-        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-gold/20 bg-gold/[0.06] p-4">
-          <Clock size={18} className="mt-0.5 shrink-0 text-gold" />
-          <p className="text-sm leading-relaxed text-ivory-dim">
-            Live balances aren&apos;t available yet — Granger Bank isn&apos;t connected to a
-            banking provider in this environment, so no account balance is fabricated
-            here. See <span className="text-gold">docs/production</span> for the integration plan.
-          </p>
-        </div>
+        <p className="mb-6 text-[10px] leading-relaxed text-[#454b56]">
+          Live balances aren&apos;t available yet — Granger Bank isn&apos;t connected to a
+          banking provider in this environment, so no account balance is fabricated
+          here. See <span className="text-[#454b56]">docs/production</span> for the integration plan.
+        </p>
       )}
 
       <div className="rounded-2xl border border-line bg-ink-3 p-6 sm:p-8">
