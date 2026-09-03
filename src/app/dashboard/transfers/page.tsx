@@ -207,8 +207,8 @@ export default function TransfersPage() {
           <p className="mt-4 text-sm leading-relaxed text-ivory-dim">
             <span className="text-ivory">Between your own accounts</span>, money never leaves Granger
             Bank — the transfer debits one account and credits the other in a single atomic step and{" "}
-            <Badge tone="positive">Settles</Badge> instantly, using the demo&apos;s fake seeded
-            balances. A transfer that would overdraw the source account is rejected and marked{" "}
+            <Badge tone="positive">Settles</Badge> instantly, using Granger Bank&apos;s internal
+            fictional ledger balances. A transfer that would overdraw the source account is rejected and marked{" "}
             <Badge tone="negative">Failed</Badge> with no money moved.
           </p>
           <p className="mt-4 text-sm leading-relaxed text-ivory-dim">

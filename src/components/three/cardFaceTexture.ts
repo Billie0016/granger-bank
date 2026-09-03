@@ -188,7 +188,7 @@ export function createCardCanvas(face: "front" | "back", accent: string) {
     ctx.fillStyle = "rgba(203,208,216,0.65)";
     ctx.letterSpacing = "0.5px";
     const legal =
-      "This card is property of Granger Bank. Fictional demo card for illustrative purposes only.";
+      "This card is property of Granger Bank. Fictional card for illustrative purposes only.";
     ctx.fillText(legal, 90, 440);
     ctx.fillText("24/7 Support  •  grangerbank.example  •  1-800-555-0142", 90, 480);
 

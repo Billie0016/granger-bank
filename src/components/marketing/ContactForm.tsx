@@ -18,7 +18,7 @@ export function ContactForm() {
         <CheckCircle2 className="text-gold" size={36} />
         <h3 className="mt-5 font-display text-2xl">Message sent</h3>
         <p className="mt-2 max-w-sm text-sm text-mist">
-          This is a demo — no message was actually transmitted. A real Granger
+          This is a preview — no message was actually transmitted. A real Granger
           Bank advisor would reach out within one business day.
         </p>
       </motion.div>
@@ -55,7 +55,7 @@ export function ContactForm() {
         Send Message
       </Button>
       <p className="text-center text-xs text-mist">
-        Demo form — no data is collected or transmitted.
+        Preview form — no data is collected or transmitted.
       </p>
     </form>
   );

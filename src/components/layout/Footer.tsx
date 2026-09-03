@@ -44,7 +44,7 @@ export function Footer() {
             </p>
             <div className="mt-6 flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-mist">
               <ShieldCheck size={16} className="text-gold" />
-              FDIC-style member protection · Demo institution
+              Fictional institution · Not a real bank
             </div>
           </div>
 

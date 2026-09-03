@@ -51,7 +51,7 @@ export function FinancialExperience() {
             A clear view of where you stand.
           </h2>
           <p className="mt-3 text-xs uppercase tracking-[0.14em] text-mist">
-            Illustrative example — not a real account
+            Illustrative preview — not a real account
           </p>
         </Reveal>
 

@@ -48,6 +48,11 @@ type CustomerDetail = {
 
 const USER_STATUSES = ["PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "CLOSED"];
 const KYC_STATUSES = ["NOT_STARTED", "PENDING", "IN_REVIEW", "APPROVED", "REJECTED", "EXPIRED"];
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  CHECKING: "Checking Account",
+  SAVINGS: "Savings Account",
+  BUSINESS: "Business Account",
+};
 
 function userStatusTone(status: string) {
   if (status === "ACTIVE") return "positive" as const;
@@ -127,7 +132,7 @@ export default function AdminCustomerDetailPage() {
         body: JSON.stringify({
           idempotencyKey: crypto.randomUUID(),
           amountMinor,
-          reason: creditReason || "Demo credit",
+          reason: creditReason || "Account credit",
         }),
       });
       setCreditingAccountId(null);
@@ -152,7 +157,7 @@ export default function AdminCustomerDetailPage() {
           customerProfileId: params.id,
           type: newAccountType,
           currency: "USD",
-          displayName: newAccountName || `${newAccountType} (demo)`,
+          displayName: newAccountName || ACCOUNT_TYPE_LABELS[newAccountType],
         }),
       });
       setOpeningAccount(false);
@@ -233,7 +238,7 @@ export default function AdminCustomerDetailPage() {
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs uppercase tracking-[0.16em] text-mist">Accounts</p>
         <Button size="md" variant="secondary" onClick={() => setOpeningAccount((v) => !v)}>
-          {openingAccount ? "Cancel" : "Open Demo Account"}
+          {openingAccount ? "Cancel" : "Open New Account"}
         </Button>
       </div>
 
@@ -256,9 +261,8 @@ export default function AdminCustomerDetailPage() {
           </div>
           {openAccountError && <p className="text-sm text-danger sm:col-span-3">{openAccountError}</p>}
           <p className="text-xs text-mist sm:col-span-3">
-            Opens an ACTIVE account with no real provider connected, ready to credit with fake demo
-            money right away — not the honest PENDING state a real customer&apos;s own account
-            request sits in.
+            Opens an ACTIVE account with no real provider connected, ready to credit right away —
+            not the honest PENDING state a real customer&apos;s own account request sits in.
           </p>
         </form>
       )}
@@ -279,7 +283,7 @@ export default function AdminCustomerDetailPage() {
             </p>
 
             {acc.providerAccountRef ? (
-              <p className="mt-4 text-xs text-mist">Connected to a real provider — demo credit unavailable.</p>
+              <p className="mt-4 text-xs text-mist">Connected to a real provider — manual credit unavailable.</p>
             ) : creditingAccountId === acc.id ? (
               <form onSubmit={handleCredit} className="mt-4 space-y-2">
                 <div className="flex items-center rounded-lg border border-line bg-ink-2 px-3 py-2 focus-within:border-gold/50">
@@ -299,7 +303,7 @@ export default function AdminCustomerDetailPage() {
                 <input
                   value={creditReason}
                   onChange={(e) => setCreditReason(e.target.value)}
-                  placeholder="Reason (e.g. demo funding)"
+                  placeholder="Reason (e.g. account funding)"
                   className="w-full rounded-lg border border-line bg-ink-2 px-3 py-2 text-sm text-ivory placeholder:text-mist-dim focus:border-gold/50 focus:outline-none"
                 />
                 {creditError && <p className="text-xs text-danger">{creditError}</p>}
@@ -322,7 +326,7 @@ export default function AdminCustomerDetailPage() {
               </form>
             ) : (
               <Button variant="secondary" size="md" className="mt-4 w-full" onClick={() => setCreditingAccountId(acc.id)}>
-                Credit Account (Demo)
+                Credit Account
               </Button>
             )}
           </div>
