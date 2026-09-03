@@ -296,6 +296,18 @@ export async function createInternalTransfer(input: CreateInternalTransferInput)
         throw new ValidationError("This transfer would overdraw the source account.");
       }
 
+      // internalLedgerBalanceMinor is nullable (an account that's never
+      // been funded has no ledger balance at all yet) — a plain Prisma
+      // `increment` translates to SQL `x = x + $amount`, and NULL + anything
+      // is NULL in Postgres, which would silently discard a first-ever
+      // credit while this function still reports the transfer as SETTLED.
+      // Backfill null to 0 first, in the same transaction, before
+      // incrementing — see the identical fix in createAdminAccountCredit
+      // below.
+      await tx.account.updateMany({
+        where: { id: destinationAccount.id, internalLedgerBalanceMinor: null },
+        data: { internalLedgerBalanceMinor: BigInt(0) },
+      });
       await tx.account.update({
         where: { id: destinationAccount.id },
         data: { internalLedgerBalanceMinor: { increment: input.amountMinor } },
