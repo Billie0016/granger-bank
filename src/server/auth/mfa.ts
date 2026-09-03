@@ -8,7 +8,20 @@ import { encryptField, decryptField, sha256Hex } from "../security/encryption";
 /**
  * TOTP-based MFA. See docs/production/04-authentication-architecture.md §3
  * and docs/production/07-security-architecture.md §9 (mandatory for admins).
+ *
+ * otplib defaults to `window: 0` — zero tolerance, only the exact current
+ * 30-second step is accepted. That's stricter than any real authenticator
+ * app expects: there's no such thing as perfectly synchronized clocks
+ * between a phone and a server, and a human reading a code off their phone
+ * and typing it in takes a few real seconds, which is enough on its own to
+ * cross a 30-second step boundary. With window: 0 this manifests as
+ * "Invalid verification code" that fails consistently, including on a
+ * code entered immediately after it refreshes, because there is never any
+ * margin at all. `window: 1` accepts the previous, current, and next step
+ * (a ±30s tolerance) — the standard recommendation for TOTP verification
+ * (matching what Google Authenticator, Authy, etc. are built to tolerate).
  */
+authenticator.options = { window: 1 };
 
 const ISSUER = "Granger Bank";
 const RECOVERY_CODE_COUNT = 10;
