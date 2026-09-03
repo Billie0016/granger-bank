@@ -81,3 +81,47 @@ export async function syncAccountBalance(accountId: string) {
     },
   });
 }
+
+/**
+ * Admin-only: opens an account for a customer that's immediately ACTIVE
+ * and creditable, for demo/testing purposes. Deliberately distinct from
+ * requestAccountOpening above, which creates the honest PENDING state a
+ * real customer request sits in until a banking provider is connected —
+ * this instead exists so an admin can give a customer with zero accounts
+ * something to fund via createAdminAccountCredit (transactionService.ts)
+ * right away, without waiting on a provider that doesn't exist in this
+ * build. Writes its own distinct audit action so it's never confused with
+ * a real customer-initiated request in the log.
+ */
+export async function adminOpenDemoAccount(params: {
+  customerProfileId: string;
+  type: AccountType;
+  currency: string;
+  displayName: string;
+  actorUserId: string;
+  actorRole: UserRole;
+}) {
+  const profile = await prisma.customerProfile.findUnique({ where: { id: params.customerProfileId } });
+  if (!profile) throw new NotFoundError("Customer not found.");
+
+  const account = await prisma.account.create({
+    data: {
+      customerProfileId: params.customerProfileId,
+      type: params.type,
+      currency: params.currency,
+      displayName: params.displayName,
+      status: "ACTIVE",
+    },
+  });
+
+  await writeAuditLog({
+    actorUserId: params.actorUserId,
+    actorRole: params.actorRole,
+    action: "account.admin_demo_account_opened",
+    targetType: "Account",
+    targetId: account.id,
+    metadata: { customerProfileId: params.customerProfileId, type: params.type, displayName: params.displayName },
+  });
+
+  return account;
+}

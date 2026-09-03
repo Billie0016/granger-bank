@@ -76,6 +76,12 @@ export default function AdminCustomerDetailPage() {
   const [creditSubmitting, setCreditSubmitting] = useState(false);
   const [creditError, setCreditError] = useState("");
 
+  const [openingAccount, setOpeningAccount] = useState(false);
+  const [newAccountType, setNewAccountType] = useState<"CHECKING" | "SAVINGS" | "BUSINESS">("CHECKING");
+  const [newAccountName, setNewAccountName] = useState("");
+  const [openAccountSubmitting, setOpenAccountSubmitting] = useState(false);
+  const [openAccountError, setOpenAccountError] = useState("");
+
   const load = useCallback(() => {
     apiFetch<{ customer: CustomerDetail }>(`/api/admin/customers/${params.id}`)
       .then((d) => {
@@ -132,6 +138,30 @@ export default function AdminCustomerDetailPage() {
       setCreditError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
       setCreditSubmitting(false);
+    }
+  }
+
+  async function handleOpenAccount(e: React.FormEvent) {
+    e.preventDefault();
+    setOpenAccountSubmitting(true);
+    setOpenAccountError("");
+    try {
+      await apiFetch("/api/admin/accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          customerProfileId: params.id,
+          type: newAccountType,
+          currency: "USD",
+          displayName: newAccountName || `${newAccountType} (demo)`,
+        }),
+      });
+      setOpeningAccount(false);
+      setNewAccountName("");
+      load();
+    } catch (err) {
+      setOpenAccountError(err instanceof ApiError ? err.message : "Something went wrong.");
+    } finally {
+      setOpenAccountSubmitting(false);
     }
   }
 
@@ -200,7 +230,39 @@ export default function AdminCustomerDetailPage() {
         </div>
       </div>
 
-      <p className="mb-3 text-xs uppercase tracking-[0.16em] text-mist">Accounts</p>
+      <div className="mb-3 flex items-center justify-between">
+        <p className="text-xs uppercase tracking-[0.16em] text-mist">Accounts</p>
+        <Button size="md" variant="secondary" onClick={() => setOpeningAccount((v) => !v)}>
+          {openingAccount ? "Cancel" : "Open Demo Account"}
+        </Button>
+      </div>
+
+      {openingAccount && (
+        <form
+          onSubmit={handleOpenAccount}
+          className="mb-6 grid gap-4 rounded-2xl border border-line bg-ink-3 p-6 sm:grid-cols-[1fr_1fr_auto]"
+        >
+          <SelectField
+            label="Account type"
+            value={newAccountType}
+            onChange={(v) => setNewAccountType(v as "CHECKING" | "SAVINGS" | "BUSINESS")}
+            options={["CHECKING", "SAVINGS", "BUSINESS"]}
+          />
+          <Field label="Display name (optional)" value={newAccountName} onChange={setNewAccountName} />
+          <div className="flex items-end">
+            <Button type="submit" size="md" className="w-full" disabled={openAccountSubmitting}>
+              {openAccountSubmitting ? "Opening…" : "Open Account"}
+            </Button>
+          </div>
+          {openAccountError && <p className="text-sm text-danger sm:col-span-3">{openAccountError}</p>}
+          <p className="text-xs text-mist sm:col-span-3">
+            Opens an ACTIVE account with no real provider connected, ready to credit with fake demo
+            money right away — not the honest PENDING state a real customer&apos;s own account
+            request sits in.
+          </p>
+        </form>
+      )}
+
       <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {customer.accounts.length === 0 && <p className="text-sm text-mist">No accounts yet.</p>}
         {customer.accounts.map((acc) => (
