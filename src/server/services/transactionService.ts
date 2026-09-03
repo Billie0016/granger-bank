@@ -387,7 +387,7 @@ export async function createAdminAccountCredit(input: CreateAdminAccountCreditIn
   if (!account) throw new NotFoundError("Account not found.");
   if (account.providerAccountRef) {
     throw new ValidationError(
-      "This account is connected to a real banking provider. The demo credit tool only works on accounts with no provider connected."
+      "This account is connected to a real banking provider. The account credit tool only works on accounts with no provider connected."
     );
   }
   if (account.status !== "ACTIVE") {
@@ -405,7 +405,7 @@ export async function createAdminAccountCredit(input: CreateAdminAccountCreditIn
         direction: "CREDIT",
         amountMinor: input.amountMinor,
         currency: account.currency,
-        reference: "Admin demo credit",
+        reference: "Account credit",
         description: input.reason,
         status: "INITIATED",
       },
